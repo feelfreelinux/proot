@@ -61,6 +61,7 @@ static int handle_option_i(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_R(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_S(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_link2symlink(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_redirect_tio(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_kill_on_exit(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
@@ -243,6 +244,17 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
 \tdo not allow hard links.\n\
 \tPROOT_L2S_DIR environment variable specifies a common directory\n\
 \tto store data for emulated hardlinks.",
+	},
+	{ .class = "Extension options",
+	  .arguments = {
+		{ .name = "--redirect_tio", .separator = '\0', .value = NULL },
+                { .name = "-l", .separator = '\0', .value = NULL },
+		{ .name = NULL, .separator = '\0', .value = NULL } },
+	  .handler = handle_option_redirect_tio,
+	  .description = "Redirects TIO* ioctl calls to fifo.",
+	  .detail = "\tRedirects TIO* calls when SELinux\n\
+\tdo not allow pty baudrate changes.\n\
+\tExists as a workaround for serial connection on android.",
 	},
         { .class = "Extension options",
           .arguments = {

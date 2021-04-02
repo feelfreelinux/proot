@@ -326,6 +326,19 @@ static int handle_option_tcsetsf2tcsets_v(Tracee *tracee, const Cli *cli UNUSED,
 	return 0;
 }
 
+static int handle_option_redirect_tio(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
+{
+	int status;
+
+	/* Initialize the redirect tio extension.  */
+	status = initialize_extension(tracee, redirect_tio_callback, NULL);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "redirect_tio not initialized");
+
+	return 0;
+}
+
+
 static int handle_option_tcsetsf2tcsets(Tracee *tracee, const Cli *cli, const char *value UNUSED)
 {
 	return handle_option_tcsetsf2tcsets_v(tracee, cli, (const char *)0);
