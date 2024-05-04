@@ -13,6 +13,7 @@
 #include "tracee/seccomp.h"
 #include "syscall/chain.h"
 #include "syscall/syscall.h" /* set_sysarg_data,  */
+#include <string.h>
 
 enum AshmemMemfdChainState {
 	CS_IDLE,
