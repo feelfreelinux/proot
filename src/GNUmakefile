@@ -8,24 +8,13 @@ SRC    = $(dir $(firstword $(MAKEFILE_LIST)))
 GIT      = git
 RM       = rm
 INSTALL  = install
-ifdef CROSS_COMPILE
-CC       = $(CROSS_COMPILE)gcc
-ifeq ($(wildcard $(CC)),)
-CC       = $(CROSS_COMPILE)clang
-endif
-STRIP    = $(CROSS_COMPILE)strip
-OBJCOPY  = $(CROSS_COMPILE)objcopy
-OBJDUMP  = $(CROSS_COMPILE)objdump
-endif
+CC       ?= $(CROSS_COMPILE)gcc
 LD       = $(CC)
+STRIP    ?= $(CROSS_COMPILE)strip
+OBJCOPY  ?= $(CROSS_COMPILE)objcopy
+OBJDUMP  ?= $(CROSS_COMPILE)objdump
 
-ifdef ANDROID_PRE5
-EXT_CPPFLAGS = -D__ANDROID_API__=14
-else
-EXT_CPPFLAGS = -D_FILE_OFFSET_BITS=64
-endif
-
-CPPFLAGS += $(EXT_CPPFLAGS) -D_GNU_SOURCE -I. -I$(VPATH)
+CPPFLAGS += -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I. -I$(VPATH)
 CFLAGS   += -Wall -Wextra -O2
 LDFLAGS  += -ltalloc -Wl,-z,noexecstack
 
@@ -61,10 +50,12 @@ OBJECTS += \
 	tracee/reg.o		\
 	tracee/event.o		\
 	tracee/seccomp.o        \
+	tracee/statx.o		\
 	ptrace/ptrace.o		\
 	ptrace/user.o		\
 	ptrace/wait.o		\
 	extension/extension.o	\
+	extension/ashmem_memfd/ashmem_memfd.o \
 	extension/kompat/kompat.o \
 	extension/fake_id0/chown.o \
 	extension/fake_id0/chroot.o \
@@ -85,11 +76,14 @@ OBJECTS += \
         extension/fake_id0/helper_functions.o \
 	extension/fake_id0/fake_id0.o \
 	extension/hidden_files/hidden_files.o \
+	extension/mountinfo/mountinfo.o \
 	extension/port_switch/port_switch.o \
+	extension/sysvipc/sysvipc.o \
+	extension/sysvipc/sysvipc_msg.o \
+	extension/sysvipc/sysvipc_sem.o \
+	extension/sysvipc/sysvipc_shm.o \
 	extension/link2symlink/link2symlink.o \
-	extension/fix_symlink_size/fix_symlink_size.o \
-	extension/tcsetsf2tcsets/tcsetsf2tcsets.o \
-	extension/redirect_tio/redirect_tio.o
+	extension/fix_symlink_size/fix_symlink_size.o
 
 define define_from_arch.h
 $2$1 := $(shell $(CC) $1 -E -dM -DNO_LIBC_HEADER $(SRC)/arch.h | grep -w $2 | cut -f 3 -d ' ')
@@ -98,13 +92,8 @@ endef
 $(eval $(call define_from_arch.h,,HAS_LOADER_32BIT))
 $(eval $(call define_from_arch.h,,HAS_POKEDATA_WORKAROUND))
 
-PROOT_UNBUNDLE_LOADER_NAME ?= loader
-PROOT_UNBUNDLE_LOADER_NAME_32 ?= loader32
-
 ifdef PROOT_UNBUNDLE_LOADER
-  CFLAGS += "-DPROOT_UNBUNDLE_LOADER=\"$(PROOT_UNBUNDLE_LOADER)\"" \
-            "-DPROOT_UNBUNDLE_LOADER_NAME=\"$(PROOT_UNBUNDLE_LOADER_NAME)\"" \
-            "-DPROOT_UNBUNDLE_LOADER_NAME_32=\"$(PROOT_UNBUNDLE_LOADER_NAME_32)\""
+  CFLAGS += "-DPROOT_UNBUNDLE_LOADER=\"$(PROOT_UNBUNDLE_LOADER)\""
 proot: | loader/loader
 ifdef HAS_LOADER_32BIT
 proot: | loader/loader-m32
@@ -180,7 +169,7 @@ BUILD_ID_NONE := $(shell if ld --build-id=none --version >/dev/null 2>&1; then e
 ######################################################################
 # Build rules
 
-COMPILE = $($(quiet)CC) $(CPPFLAGS) $(CFLAGS) -MD -c $< -o $@
+COMPILE = $($(quiet)CC) $(CPPFLAGS) $(CFLAGS) -MD -c $(SRC)$< -o $@
 LINK    = $($(quiet)LD) -o $@ $^ $(LDFLAGS)
 
 OBJIFY = $($(quiet)GEN)									\
@@ -262,24 +251,25 @@ DEPS = $(OBJECTS:.o=.d) $(LOADER_OBJECTS:.o=.d) $(LOADER-m32_OBJECTS:.o=.d) $(CH
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
-LOADERDIR ?= $(BINDIR)/$(PROOT_UNBUNDLE_LOADER)
 
 .PHONY: clean distclean install uninstall
 clean distclean:
-	-$(RM) -f $(CHECK_OBJECTS) $(CHECK_PROGRAMS) $(CHECK_RESULTS) $(OBJECTS) $(LOADER_OBJECTS) $(LOADER-m32_OBJECTS) proot loader/loader loader/loader-m32 loader/loader-info.{c,d,o} $(DEPS) build.h licenses
+	-$(RM) -f $(CHECK_OBJECTS) $(CHECK_PROGRAMS) $(CHECK_RESULTS) $(OBJECTS) $(LOADER_OBJECTS) $(LOADER-m32_OBJECTS) proot loader/loader loader/loader-m32 $(DEPS) build.h licenses
 
 install: proot
-	$($(quiet)INSTALL) -D $< $(BINDIR)/$<
+	$($(quiet)INSTALL) -D $< $(DESTDIR)$(BINDIR)/$<
 ifdef PROOT_UNBUNDLE_LOADER
-	$(INSTALL) -D loader/loader $(LOADERDIR)/$(PROOT_UNBUNDLE_LOADER_NAME)
+	$(INSTALL) -D loader/loader $(PROOT_UNBUNDLE_LOADER)/loader
 ifdef HAS_LOADER_32BIT
-	$(INSTALL) -D loader/loader-m32 $(LOADERDIR)/$(PROOT_UNBUNDLE_LOADER_NAME_32)
+	$(INSTALL) -D loader/loader-m32 $(PROOT_UNBUNDLE_LOADER)/loader32
 endif
 endif
 
 uninstall:
-	-$(RM) -f $(BINDIR)/proot
+	-$(RM) -f $(DESTDIR)$(BINDIR)/proot
 ifdef PROOT_UNBUNDLE_LOADER
-	$(INSTALL) -D loader/loader $(LOADERDIR)/loader
-	$(INSTALL) -D loader/loader-m32 $(LOADERDIR)/loader32
+	$(INSTALL) -D loader/loader $(PROOT_UNBUNDLE_LOADER)/loader
+ifdef HAS_LOADER_32BIT
+	$(INSTALL) -D loader/loader-m32 $(PROOT_UNBUNDLE_LOADER)/loader32
+endif
 endif

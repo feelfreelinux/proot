@@ -17,6 +17,9 @@
 #include "arch.h"
 #include "attribute.h"
 
+#define PREFIX ".proot.l2s."
+#define DELETED_SUFFIX " (deleted)"
+
 /**
  * Make it so fake hard links look like real hard link with respect to number of links and inode 
  * This function returns -errno if an error occured, otherwise 0.
@@ -45,8 +48,8 @@ static int handle_sysexit_end(Tracee *tracee)
         if (result != 0)
             return 0;
 
-        /* for lstat, the link2symlink extension should have already drilled down to the final final and past a fake hard link
-           so if the path returned points to a symbolic link, it should be a normal symbolic link */
+        /*for lstat, the link2symlink extension should have already drilled down to the final final and past a fake hard link
+          so if the path returned points to a symbolic link, it should be a normal symbolic link*/
         sysarg_path = SYSARG_1;
         size = read_string(tracee, original, peek_reg(tracee, MODIFIED, sysarg_path), PATH_MAX);
         if (size < 0)
@@ -56,7 +59,7 @@ static int handle_sysexit_end(Tracee *tracee)
 
         /* Check if it is a link */
         status = lstat(original, &statl);
-        if (status < 0)  { // shouldn't happen
+        if (status < 0)  {//shouldn't happen
            return status;
         }
 
@@ -64,8 +67,8 @@ static int handle_sysexit_end(Tracee *tracee)
         if (!S_ISLNK(statl.st_mode)) {
            return 0;
         }
-
-
+ 
+        
         size = readlink(original, intermediate, PATH_MAX);
         if (size < 0)
             return size;

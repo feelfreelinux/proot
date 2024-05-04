@@ -23,6 +23,7 @@
 #include <errno.h>       /* errno(3), E* */
 #include <sys/utsname.h> /* struct utsname, */
 #include <linux/net.h>   /* SYS_*, */
+#include <linux/ioctl.h> /* _IOW, */
 #include <string.h>      /* strlen(3), */
 
 #include "cli/note.h"
@@ -38,6 +39,7 @@
 #include "tracee/mem.h"
 #include "tracee/abi.h"
 #include "tracee/seccomp.h"
+#include "tracee/statx.h"
 #include "path/path.h"
 #include "ptrace/ptrace.h"
 #include "ptrace/wait.h"
@@ -69,6 +71,19 @@ void translate_syscall_exit(Tracee *tracee)
 	if (tracee->status < 0) {
 		poke_reg(tracee, SYSARG_RESULT, (word_t) tracee->status);
 		goto end;
+	}
+
+	/* If proot changed syscall to PR_void during enter,
+	 * keep syscall result set during entry. */
+	if (peek_reg(tracee, MODIFIED, SYSARG_NUM) ==
+#if defined(ARCH_ARM64) || defined(ARCH_X86_64)
+			(is_32on64_mode(tracee) ? (SYSCALL_AVOIDER & 0xFFFFFFFF) : SYSCALL_AVOIDER)
+#else
+			SYSCALL_AVOIDER
+#endif
+			&&
+			peek_reg(tracee, ORIGINAL, SYSARG_NUM) != peek_reg(tracee, MODIFIED, SYSARG_NUM)) {
+		poke_reg(tracee, SYSARG_RESULT, peek_reg(tracee, MODIFIED, SYSARG_RESULT));
 	}
 
 	/* Translate output arguments:
@@ -362,6 +377,19 @@ void translate_syscall_exit(Tracee *tracee)
 			break;
 		}
 
+		if (status == 1) {
+			/* Empty path was passed (""),
+			 * indicating that path is pointed to by fd passed in first argument */
+			word_t dirfd = peek_reg(tracee, ORIGINAL, SYSARG_1);
+			if (syscall_number == PR_readlink || dirfd < 0) {
+				status = -EBADF;
+				break;
+			}
+			status = readlink_proc_pid_fd(tracee->pid, dirfd, referer);
+			if (status < 0)
+				break;
+		}
+
 		status = detranslate_path(tracee, referee, referer);
 		if (status < 0)
 			break;
@@ -429,6 +457,7 @@ void translate_syscall_exit(Tracee *tracee)
 #endif
 
 	case PR_execve:
+	case PR_execveat:
 		translate_execve_exit(tracee);
 		goto end;
 
@@ -498,7 +527,8 @@ void translate_syscall_exit(Tracee *tracee)
 			 * little endian, it will need only first 4 bytes to be modified,
 			 * as next 4 bytes will always be 0))
 			 * */
-			int write_status = write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), "\x94\x19\x02\x01", 4);
+			word_t stat_addr = peek_reg(tracee, ORIGINAL, syscall_number == PR_statfs64 ? SYSARG_3 : SYSARG_2);
+			int write_status = write_data(tracee, stat_addr, "\x94\x19\x02\x01", 4);
 			if (write_status < 0) {
 				VERBOSE(tracee, 5, "Updating statfs() result failed");
 			}
@@ -509,6 +539,17 @@ void translate_syscall_exit(Tracee *tracee)
 
 		goto end;
 	}
+
+	case PR_statx:
+		status = handle_statx_syscall(tracee, false);
+		break;
+
+	case PR_ioctl:
+		if (peek_reg(tracee, ORIGINAL, SYSARG_2) == _IOW(0x94, 9, int) /* FICLONE */ &&
+				(int) peek_reg(tracee, CURRENT, SYSARG_RESULT) == -EACCES) {
+			poke_reg(tracee, SYSARG_RESULT, -EOPNOTSUPP);
+		}
+		goto end;
 
 	default:
 		goto end;

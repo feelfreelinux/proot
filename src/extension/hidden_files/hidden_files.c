@@ -7,24 +7,19 @@
  * deleted by wildcard expressions.
  */
 
-#include "cli/note.h"
 #include "extension/extension.h"
 #include "tracee/mem.h"
 #include "syscall/chain.h"
 #include "path/path.h"
 
 /* Change the HIDDEN_PREFIX to change which files are hidden */
-#define HIDDEN_PREFIX ".proot."
+#define HIDDEN_PREFIX ".proot"
 
 struct linux_dirent {
     unsigned long d_ino;
     unsigned long d_off;
     unsigned short d_reclen;
     char d_name[];
-    /*
-    char pad;
-    char d_type;
-    */
 };
 
 struct linux_dirent64 {
@@ -38,7 +33,7 @@ struct linux_dirent64 {
 /*
  * Blind copies the given num of bytes from src to dst
  */
-static void mybcopy(const char *src, char *dst, size_t num) {
+static void mybcopy(char *src, char *dst, unsigned int num) {
     while(num--) { *(dst++) = *(src++); }
 }
 
@@ -47,12 +42,13 @@ static void mybcopy(const char *src, char *dst, size_t num) {
  * If str has the given prefix, return 1. Otherwise
  * return 0
  */
-static int hasprefix(const char *prefix, const char *str) {
+
+static int hasprefix(char *prefix, char *str) {
     while (*prefix && *str && (*(prefix) == *(str))) {
         prefix++;
         str++;
     }
-
+  
     /* If there is not any prefix left after stepping
      * through the strings, then it matches */
     if (!(*prefix)) { return 1; }
@@ -63,20 +59,20 @@ static int hasprefix(const char *prefix, const char *str) {
  * Hide all files with a given PREFIX so they don't exist to
  * the user
  */
-static int handle_getdents(Tracee *const tracee)
+static int handle_getdents(Tracee *tracee)
 {
     switch (get_sysnum(tracee, ORIGINAL)) {
-    case PR_getdents64:
+    case PR_getdents64: 
     case PR_getdents: {
         /* get the result of the syscall, which is the number of bytes read by getdents */
-        const size_t res = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        unsigned int res = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if (res <= 0) {
             return res;
         }
 
         /* get the system call arguments */
-        const word_t orig_start = peek_reg(tracee, CURRENT, SYSARG_2);
-        const size_t count = peek_reg(tracee, CURRENT, SYSARG_3);
+        word_t orig_start = peek_reg(tracee, CURRENT, SYSARG_2);
+        unsigned int count = peek_reg(tracee, CURRENT, SYSARG_3);
         char orig[count];
 
         char path[PATH_MAX];
@@ -95,17 +91,22 @@ static int handle_getdents(Tracee *const tracee)
 
         /* allocate a space for the copy of the data we want */
         char copy[count];
+        /* curr will hold the current struct we're examining */
+        struct linux_dirent64 *curr64;
+        struct linux_dirent *curr32;
         /* pos keeps track of where in memory the copy is */
         char *pos = copy;
         /* ptr keeps track of where in memory the original is */
         char *ptr = orig;
+        /* nleft keeps track of how many bytes we've saved */
+        unsigned int nleft = 0;
 
         /* while we're still within the memory allowed */
         if (get_sysnum(tracee, ORIGINAL) == PR_getdents64) {
             while (ptr < orig + res) {
 
                 /* get the current struct */
-                struct linux_dirent64 *const curr64 = (struct linux_dirent64 *)ptr;
+                curr64 = (struct linux_dirent64 *)ptr;
 
                 /* if the name does not matche a given prefix */
                 if (!hasprefix(HIDDEN_PREFIX, curr64->d_name)) {
@@ -115,6 +116,7 @@ static int handle_getdents(Tracee *const tracee)
 
                     /* move the pos and nleft */
                     pos += curr64->d_reclen;
+                    nleft += curr64->d_reclen;
                 }
                 /* move to the next linux_dirent */
                 ptr += curr64->d_reclen;
@@ -123,7 +125,7 @@ static int handle_getdents(Tracee *const tracee)
             while (ptr < orig + res) {
 
                 /* get the current struct */
-                struct linux_dirent *const curr32 = (struct linux_dirent *)ptr;
+                curr32 = (struct linux_dirent *)ptr;
 
                 /* if the name does not matche a given prefix */
                 if (!hasprefix(HIDDEN_PREFIX, curr32->d_name)) {
@@ -133,12 +135,12 @@ static int handle_getdents(Tracee *const tracee)
 
                     /* move the pos and nleft */
                     pos += curr32->d_reclen;
+                    nleft += curr32->d_reclen;
                 }
                 /* move to the next linux_dirent */
                 ptr += curr32->d_reclen;
             }
         }
-        const size_t nleft = pos - copy;
         /* If there is nothing left */
         if (!nleft) {
             /* call getdents again */
@@ -186,8 +188,9 @@ int hidden_files_callback(Extension *extension, ExtensionEvent event,
     }
 
     case SYSCALL_CHAINED_EXIT:
-    case SYSCALL_EXIT_END:
+    case SYSCALL_EXIT_END: {
         return handle_getdents(TRACEE(extension));
+    }
 
     default:
         return 0;

@@ -28,6 +28,7 @@
 #include "cli/cli.h"
 #include "cli/note.h"
 #include "extension/extension.h"
+#include "extension/sysvipc/sysvipc.h"
 #include "path/binding.h"
 #include "attribute.h"
 
@@ -292,6 +293,30 @@ static int handle_option_link2symlink(Tracee *tracee, const Cli *cli UNUSED, con
 	return 0;
 }
 
+static int handle_option_ashmem_memfd(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
+{
+	int status;
+
+	/* Initialize the ashmem-memfd extension.  */
+	status = initialize_extension(tracee, ashmem_memfd_callback, NULL);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "ashmem-memfd not initialized");
+
+	return 0;
+}
+
+static int handle_option_sysvipc(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
+{
+	int status;
+
+	/* Initialize the sysvipc extension.  */
+	status = initialize_extension(tracee, sysvipc_callback, NULL);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "sysvipc not initialized");
+
+	return 0;
+}
+
 static int handle_option_L(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
 {
         (void) initialize_extension(tracee, fix_symlink_size_callback, NULL);
@@ -308,45 +333,6 @@ static int handle_option_p(Tracee *tracee, const Cli *cli UNUSED, const char *va
 {
         (void) initialize_extension(tracee, port_switch_callback, NULL);
         return 0;
-}
-
-static int handle_option_tcsetsf2tcsets_v(Tracee *tracee, const Cli *cli UNUSED, const char *value)
-{
-	void *extension = get_extension(tracee, tcsetsf2tcsets_callback);
-	if (extension != NULL) {
-		note(tracee, WARNING, USER, "option --tcsetsf2tcsets[w] was already specified");
-		note(tracee, INFO, USER, "only the last --tcsetsf2tcsets[w] option is enabled");
-		TALLOC_FREE(extension);
-	}
-
-	const int status = initialize_extension(tracee, tcsetsf2tcsets_callback, value);
-	if (status < 0)
-		note(tracee, WARNING, INTERNAL, "tcsetsf2tcsets[w] not initialized");
-
-	return 0;
-}
-
-static int handle_option_redirect_tio(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
-{
-	int status;
-
-	/* Initialize the redirect tio extension.  */
-	status = initialize_extension(tracee, redirect_tio_callback, NULL);
-	if (status < 0)
-		note(tracee, WARNING, INTERNAL, "redirect_tio not initialized");
-
-	return 0;
-}
-
-
-static int handle_option_tcsetsf2tcsets(Tracee *tracee, const Cli *cli, const char *value UNUSED)
-{
-	return handle_option_tcsetsf2tcsets_v(tracee, cli, (const char *)0);
-}
-
-static int handle_option_tcsetsf2tcsetsw(Tracee *tracee, const Cli *cli, const char *value UNUSED)
-{
-	return handle_option_tcsetsf2tcsets_v(tracee, cli, (const char *)1);
 }
 
 /**

@@ -265,11 +265,12 @@ typedef struct {
 } ModifiedNode;
 
 /* List of syscalls handled by this extensions.  */
-static const FilteredSysnum filtered_sysnums[] = {
+static FilteredSysnum filtered_sysnums[] = {
 #ifdef USERLAND
 	{ PR_access,		FILTER_SYSEXIT },
 	{ PR_creat,		FILTER_SYSEXIT },
 	{ PR_faccessat,		FILTER_SYSEXIT },
+	{ PR_faccessat2,	FILTER_SYSEXIT },
 	{ PR_link,		FILTER_SYSEXIT },
 	{ PR_linkat,		FILTER_SYSEXIT },
 	{ PR_mkdir,		FILTER_SYSEXIT },
@@ -499,7 +500,7 @@ static int adjust_elf_auxv(Tracee *tracee, Config *config)
 	return 0;
 }
 
-static int handle_perm_err_exit_end(Tracee *tracee, Config *config) {
+static int handle_perm_err_exit_end(Tracee *tracee, Config *config, bool even_if_not_root) {
 	word_t result;
 
 	/* Override only permission errors.  */
@@ -520,7 +521,7 @@ static int handle_perm_err_exit_end(Tracee *tracee, Config *config) {
 
 	/* Force success if the tracee was supposed to have
 	 * the capability.  */
-	if (config->euid == 0) /* TODO: || HAS_CAP(...) */
+	if (even_if_not_root || config->euid == 0) /* TODO: || HAS_CAP(...) */
 		poke_reg(tracee, SYSARG_RESULT, 0);
 
 	return 0;
@@ -644,6 +645,7 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 		return handle_access_enter_end(tracee, SYSARG_1, SYSARG_2, IGNORE_SYSARG, config);
 	/* int faccessat(int dirfd, const char *pathname, int mode, int flags) */
 	case PR_faccessat:
+	case PR_faccessat2:
 		return handle_access_enter_end(tracee, SYSARG_2, SYSARG_3, SYSARG_1, config); 
 
 	/* handle_exec(tracee, filename_sysarg, config) */
@@ -906,9 +908,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	case PR_mknod:
 	case PR_mknodat:
 	case PR_capset:
-	case PR_setxattr:
-	case PR_lsetxattr:
-	case PR_fsetxattr:
 	case PR_chmod:
 	case PR_chown:
 	case PR_fchmod:
@@ -919,7 +918,12 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	case PR_lchown32:
 	case PR_fchmodat:
 	case PR_fchownat: 
-		return handle_perm_err_exit_end(tracee, config);
+		return handle_perm_err_exit_end(tracee, config, false);
+
+	case PR_setxattr:
+	case PR_lsetxattr:
+	case PR_fsetxattr:
+		return handle_perm_err_exit_end(tracee, config, true);
 
 	case PR_socket: 
 		return handle_socket_exit_end(tracee, config);
@@ -1049,9 +1053,10 @@ static int handle_sysexit_start(Tracee *tracee, Config *config) {
 
 	/* This has to be done before PRoot pushes the load
 	 * script into tracee's stack.  */
-	adjust_elf_auxv(tracee, config);
+	if (!tracee->skip_proot_loader)
+		adjust_elf_auxv(tracee, config);
 
-	status = stat(tracee->load_info->host_path, &mode);
+	status = stat(tracee->host_exe, &mode);
 	if (status < 0)
 		return 0; /* Not fatal.  */
 
@@ -1260,6 +1265,13 @@ int fake_id0_callback(Extension *extension, ExtensionEvent event, intptr_t data1
 		Config *config = talloc_get_type_abort(extension->config, Config);
 
 		return handle_sysexit_start(tracee, config);
+	}
+
+	case STATX_SYSCALL: {
+		Tracee *tracee = TRACEE(extension);
+		Config *config = talloc_get_type_abort(extension->config, Config);
+
+		return fake_id0_handle_statx_syscall(tracee, config, data1);
 	}
 
 	default:

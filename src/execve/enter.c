@@ -387,6 +387,10 @@ static int expand_runner(Tracee* tracee, char host_path[PATH_MAX], char user_pat
 		size_t nb_qemu_args;
 		size_t i;
 
+		if (getenv("PROOT_USE_LOADER_FOR_QEMU") == NULL) {
+			tracee->skip_proot_loader = true;
+		}
+
 		status = fetch_array_of_xpointers(tracee, &argv, SYSARG_2, 0);
 		if (status < 0)
 			return status;
@@ -441,8 +445,12 @@ static int expand_runner(Tracee* tracee, char host_path[PATH_MAX], char user_pat
 
 		strcpy(host_path, tracee->qemu[0]);
 
-		strcpy(user_path, HOST_ROOTFS);
-		strcat(user_path, host_path);
+		if (tracee->skip_proot_loader) {
+			strcpy(user_path, host_path);
+		} else {
+			strcpy(user_path, HOST_ROOTFS);
+			strcat(user_path, host_path);
+		}
 	}
 
 	/* Provide information to the host dynamic linker to find host
@@ -547,28 +555,6 @@ end:
 }
 #endif
 
-static inline const char *where_am_i(const char *const postfix)
-{
-	char buf[PATH_MAX + 1];
-	const ssize_t r = readlink("/proc/self/exe", buf, sizeof(buf));
-	if (r < 0 || r >= sizeof(buf)) return NULL;
-	buf[r] = '\0';
-	char *p = strrchr(buf, '/');
-	if (p == NULL) return NULL;
-	p++;
-	const size_t postfix_len = strlen(postfix);
-	if (buf + sizeof(buf) - p < postfix_len + 1) return NULL;
-	memcpy(p, postfix, postfix_len + 1);
-	return talloc_strdup(talloc_autofree_context(), buf);
-}
-
-static inline const char *resolve_path(const char *const path)
-{
-	if (path == NULL) return NULL;
-	if (path[0] == '/') return path;
-	return where_am_i(path);
-}
-
 /**
  * Get the path to the loader for the given @tracee.  This function
  * returns NULL if an error occurred.
@@ -576,22 +562,12 @@ static inline const char *resolve_path(const char *const path)
 static inline const char *get_loader_path(const Tracee *tracee)
 {
 #if defined(PROOT_UNBUNDLE_LOADER)
-
-#ifndef PROOT_UNBUNDLE_LOADER_NAME
-#define PROOT_UNBUNDLE_LOADER_NAME "loader"
-#endif
-
 #if defined(HAS_LOADER_32BIT)
-
-#ifndef PROOT_UNBUNDLE_LOADER_NAME_32
-#define PROOT_UNBUNDLE_LOADER_NAME_32 "loader32"
-#endif
-
 	if (IS_CLASS32(tracee->load_info->elf_header)) {
-		return resolve_path(getenv("PROOT_LOADER_32") ?: PROOT_UNBUNDLE_LOADER "/" PROOT_UNBUNDLE_LOADER_NAME_32);
+		return getenv("PROOT_LOADER_32") ?: PROOT_UNBUNDLE_LOADER "/loader32";
 	}
 #endif
-	return resolve_path(getenv("PROOT_LOADER") ?: PROOT_UNBUNDLE_LOADER "/" PROOT_UNBUNDLE_LOADER_NAME);
+	return getenv("PROOT_LOADER") ?: PROOT_UNBUNDLE_LOADER "/loader";
 #else
 	static char *loader_path = NULL;
 
@@ -599,13 +575,13 @@ static inline const char *get_loader_path(const Tracee *tracee)
 	static char *loader32_path = NULL;
 
 	if (IS_CLASS32(tracee->load_info->elf_header)) {
-		loader32_path = loader32_path ?: resolve_path(getenv("PROOT_LOADER_32")) ?: extract_loader(tracee, true);
+		loader32_path = loader32_path ?: getenv("PROOT_LOADER_32") ?: extract_loader(tracee, true);
 		return loader32_path;
 	}
 	else
 #endif
 	{
-		loader_path = loader_path ?: resolve_path(getenv("PROOT_LOADER")) ?: extract_loader(tracee, false);
+		loader_path = loader_path ?: getenv("PROOT_LOADER") ?: extract_loader(tracee, false);
 		return loader_path;
 	}
 #endif
@@ -660,6 +636,9 @@ int translate_execve_enter(Tracee *tracee)
 	/* Remember the new value for "/proc/self/exe".  It points to
 	 * a canonicalized guest path, hence detranslate_path()
 	 * instead of using user_path directly.  */
+	talloc_unlink(tracee, tracee->host_exe);
+	tracee->host_exe = talloc_strdup(tracee, host_path);
+
 	strcpy(new_exe, host_path);
 	status = detranslate_path(tracee, new_exe, NULL);
 	if (status >= 0) {
@@ -669,13 +648,25 @@ int translate_execve_enter(Tracee *tracee)
 	else
 		tracee->new_exe = NULL;
 
+	tracee->skip_proot_loader = false;
 	if (tracee->qemu != NULL) {
 		status = expand_runner(tracee, host_path, user_path);
 		if (status < 0)
 			return status;
 	}
 
-	TALLOC_FREE(tracee->load_info);
+	talloc_unlink(tracee, tracee->load_info);
+
+	if (tracee->skip_proot_loader) {
+		tracee->load_info = NULL;
+		tracee->heap->disabled = true;
+
+		status = set_sysarg_path(tracee, host_path, SYSARG_1);
+		if (status < 0)
+			return status;
+
+		return 0;
+	}
 
 	tracee->load_info = talloc_zero(tracee, LoadInfo);
 	if (tracee->load_info == NULL)

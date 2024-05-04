@@ -343,7 +343,9 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_connect,		0 },
 	{ PR_creat,		0 },
 	{ PR_execve,		FILTER_SYSEXIT },
+	{ PR_execveat,		FILTER_SYSEXIT },
 	{ PR_faccessat,		0 },
+	{ PR_faccessat2,	0 },
 	{ PR_fchdir,		FILTER_SYSEXIT },
 	{ PR_fchmodat,		0 },
 	{ PR_fchownat,		0 },
@@ -354,6 +356,9 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_getsockname,	FILTER_SYSEXIT },
 	{ PR_getxattr,		0 },
 	{ PR_inotify_add_watch,	0 },
+#ifdef __ANDROID__
+	{ PR_ioctl,		FILTER_SYSEXIT },
+#endif
 	{ PR_lchown,		0 },
 	{ PR_lchown32,		0 },
 	{ PR_lgetxattr,		0 },
@@ -365,6 +370,9 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_lsetxattr,		0 },
 	{ PR_lstat,		0 },
 	{ PR_lstat64,		0 },
+#ifdef __ANDROID__
+	{ PR_memfd_create,	0 },
+#endif
 	{ PR_mkdir,		0 },
 	{ PR_mkdirat,		0 },
 	{ PR_mknod,		0 },
@@ -394,6 +402,7 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_stat64,		0 },
 	{ PR_statfs,		FILTER_SYSEXIT },
 	{ PR_statfs64,		FILTER_SYSEXIT },
+	{ PR_statx,		FILTER_SYSEXIT },
 	{ PR_swapoff,		0 },
 	{ PR_swapon,		0 },
 	{ PR_symlink,		0 },

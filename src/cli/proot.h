@@ -61,18 +61,17 @@ static int handle_option_i(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_R(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_S(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_link2symlink(Tracee *tracee, const Cli *cli, const char *value);
-static int handle_option_redirect_tio(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_ashmem_memfd(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_sysvipc(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_kill_on_exit(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
-static int handle_option_tcsetsf2tcsets(Tracee *tracee, const Cli *cli, const char *value);
-static int handle_option_tcsetsf2tcsetsw(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
 
-static const Cli proot_cli = {
+static Cli proot_cli = {
 	.version  = VERSION,
 	.name     = "proot",
 	.subtitle = "chroot, mount --bind, and binfmt_misc without privilege/setup",
@@ -239,22 +238,27 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
                 { .name = "-l", .separator = '\0', .value = NULL },
 		{ .name = NULL, .separator = '\0', .value = NULL } },
 	  .handler = handle_option_link2symlink,
-	  .description = "Replace hard links with symlinks, pretending they are hardlinks.",
+	  .description = "Replace hard links with symlinks, pretending they are really hardlinks",
 	  .detail = "\tEmulates hard links with symbolic links when SELinux policies\n\
-\tdo not allow hard links.\n\
-\tPROOT_L2S_DIR environment variable specifies a common directory\n\
-\tto store data for emulated hardlinks.",
+\tdo not allow hard links.",
 	},
 	{ .class = "Extension options",
 	  .arguments = {
-		{ .name = "--redirect_tio", .separator = '\0', .value = NULL },
-                { .name = "-l", .separator = '\0', .value = NULL },
+		{ .name = "--sysvipc", .separator = '\0', .value = NULL },
 		{ .name = NULL, .separator = '\0', .value = NULL } },
-	  .handler = handle_option_redirect_tio,
-	  .description = "Redirects TIO* ioctl calls to fifo.",
-	  .detail = "\tRedirects TIO* calls when SELinux\n\
-\tdo not allow pty baudrate changes.\n\
-\tExists as a workaround for serial connection on android.",
+	  .handler = handle_option_sysvipc,
+	  .description = "Handle System V IPC syscalls in proot",
+	  .detail = "\tHandles System V IPC syscalls (shmget, semget, msgget, etc.)\n\
+\tsyscalls inside proot. IPC is handled inside proot and launching 2 proot instances\n\
+\twill lead to 2 different IPC Namespaces",
+	},
+	{ .class = "Extension options",
+	  .arguments = {
+		{ .name = "--ashmem-memfd", .separator = '\0', .value = NULL },
+		{ .name = NULL, .separator = '\0', .value = NULL } },
+          .handler = handle_option_ashmem_memfd,
+          .description = "Emulate memfd_create support through ashmem and simulate fstat.st_size for ashmem",
+          .detail = "",
 	},
         { .class = "Extension options",
           .arguments = {
@@ -279,22 +283,6 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .handler = handle_option_L,
           .description = "Correct the size returned from lstat for symbolic links.",
           .detail = "",
-        },
-        { .class = "Extension options",
-          .arguments = {
-                { .name = "--tcsetsf2tcsets", .separator = '\0', .value = NULL },
-                { .name = NULL, .separator = '\0', .value = NULL } },
-          .handler = handle_option_tcsetsf2tcsets,
-          .description = "TCSETSF is forbidden in Android. Substitute with TCSETS.",
-          .detail = "tcsetattr(TCSAFLUSH, ...) => tcsetattr(TCSANOW, ...) in other words.",
-        },
-        { .class = "Extension options",
-          .arguments = {
-                { .name = "--tcsetsf2tcsetsw", .separator = '\0', .value = NULL },
-                { .name = NULL, .separator = '\0', .value = NULL } },
-          .handler = handle_option_tcsetsf2tcsetsw,
-          .description = "TCSETSF is forbidden in Android. Substitute with TCSETSW.",
-          .detail = "tcsetattr(TCSAFLUSH, ...) => tcsetattr(TCSDRAIN, ...) in other words.",
         },
 	{ .class = "Alias options",
 	  .arguments = {

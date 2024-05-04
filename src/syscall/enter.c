@@ -28,7 +28,9 @@
 #include <limits.h>      /* PATH_MAX, */
 #include <string.h>      /* strcpy */
 #include <sys/prctl.h>   /* PR_SET_DUMPABLE */
+#include <termios.h>     /* TCSETS, TCSANOW */
 
+#include "cli/note.h"
 #include "syscall/syscall.h"
 #include "syscall/sysnum.h"
 #include "syscall/socket.h"
@@ -123,6 +125,20 @@ int translate_syscall_enter(Tracee *tracee)
 		break;
 
 	case PR_execve:
+		status = translate_execve_enter(tracee);
+		break;
+
+	case PR_execveat:
+		if ((int) peek_reg(tracee, CURRENT, SYSARG_1) == AT_FDCWD) {
+			set_sysnum(tracee, PR_execve);
+			poke_reg(tracee, SYSARG_1, peek_reg(tracee, CURRENT, SYSARG_2));
+			poke_reg(tracee, SYSARG_2, peek_reg(tracee, CURRENT, SYSARG_3));
+			poke_reg(tracee, SYSARG_3, peek_reg(tracee, CURRENT, SYSARG_4));
+		} else {
+			note(tracee, ERROR, SYSTEM, "execveat() with non-AT_FDCWD fd is not currently supported");
+			status = -ENOSYS;
+			break;
+		}
 		status = translate_execve_enter(tracee);
 		break;
 
@@ -416,6 +432,7 @@ int translate_syscall_enter(Tracee *tracee)
 
 	case PR_fchmodat:
 	case PR_faccessat:
+	case PR_faccessat2:
 	case PR_futimesat:
 	case PR_mknodat:
 		dirfd = peek_reg(tracee, CURRENT, SYSARG_1);
@@ -568,6 +585,22 @@ int translate_syscall_enter(Tracee *tracee)
 		status = translate_path2(tracee, newdirfd, newpath, SYSARG_3, SYMLINK);
 		break;
 
+	case PR_statx:
+		newdirfd = peek_reg(tracee, CURRENT, SYSARG_1);
+
+		status = get_sysarg_path(tracee, newpath, SYSARG_2);
+		if (status < 0)
+			break;
+
+		status = translate_path2(
+			tracee,
+			newdirfd,
+			newpath,
+			SYSARG_2,
+			(peek_reg(tracee, CURRENT, SYSARG_3) & AT_SYMLINK_NOFOLLOW) ? SYMLINK : REGULAR
+		);
+		break;
+
 	case PR_prctl:
 		/* Prevent tracees from setting dumpable flag.
 		 * (Otherwise it could break tracee memory access)  */
@@ -576,7 +609,40 @@ int translate_syscall_enter(Tracee *tracee)
 			status = 0;
 		}
 		break;
+
+#ifdef __ANDROID__
+	case PR_ioctl:
+		/* Using literal value because Termux build system patches TCSAFLUSH */
+		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCSETS + 2 /* + TCSAFLUSH */) {
+			poke_reg(tracee, SYSARG_2, TCSETS + TCSANOW);
+		}
+		break;
+#endif
+	
+	case PR_memfd_create:
+		{
+			char memfd_name[20] = {};
+			if (read_string(tracee, memfd_name, peek_reg(tracee, CURRENT, SYSARG_1), sizeof(memfd_name) - 1) < 0) {
+				/* Failed to read memfd name, do nothing and let normal memfd proceed.  */
+				break;
+			}
+			/* If this memfd is one of those used by Qt/QML for executable code,
+			 * deny memfd_create() call and let Qt fall back to anonymous mmap.  */
+			if (0 == strncmp(memfd_name, "JITCode:", 8)) {
+				status = -EACCES;
+			}
+			/* php8.3 attempts using memfd as lock through fcntl(F_SETLKW),
+			 * which is not allowed on Android,
+			 * deny memfd_create() call and let php fall back to open(O_TMPFILE).
+			 * https://github.com/php/php-src/blob/26c432d850c153aaf79a1b24e4753bc0533e02b0/ext/opcache/zend_shared_alloc.c#L91
+			 */
+			if (0 == strcmp(memfd_name, "opcache_lock")) {
+				status = -EACCES;
+			}
+			break;
+		}
 	}
+
 
 end:
 	status2 = notify_extensions(tracee, SYSCALL_ENTER_END, status, 0);
