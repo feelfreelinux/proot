@@ -82,7 +82,6 @@ OBJECTS += \
         extension/fake_id0/helper_functions.o \
 	extension/fake_id0/fake_id0.o \
 	extension/hidden_files/hidden_files.o \
-	extension/mountinfo/mountinfo.o \
 	extension/port_switch/port_switch.o \
 	extension/sysvipc/sysvipc.o \
 	extension/sysvipc/sysvipc_msg.o \
@@ -90,6 +89,11 @@ OBJECTS += \
 	extension/sysvipc/sysvipc_shm.o \
 	extension/link2symlink/link2symlink.o \
 	extension/fix_symlink_size/fix_symlink_size.o
+
+
+ifndef ANDROID_PRE5
+OBJECTS += extension/mountinfo/mountinfo.o
+endif
 
 define define_from_arch.h
 $2$1 := $(shell $(CC) $1 -E -dM -DNO_LIBC_HEADER $(SRC)/arch.h | grep -w $2 | cut -f 3 -d ' ')
